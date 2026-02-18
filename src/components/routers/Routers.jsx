@@ -4,7 +4,7 @@ import Products from '../pages/Products'
 import Contact from '../pages/Contact'
 import Cart from '../pages/Cart'
 import Login from '../pages/Login'
-import AssessmentProtectedRoute from './AssessmentProtectedRoute'
+import AssessmentProtectedRoute from '../AssessmentProtectedRoute'
 import { Routes, Route } from 'react-router-dom'
 function Routers() {
   return (
