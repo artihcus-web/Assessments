@@ -18,6 +18,8 @@ function Home() {
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+  const [rulesData, setRulesData] = useState(null) // { module, settings }
+  const [rulesAccepted, setRulesAccepted] = useState(false)
   const autoSubmitDone = useRef(false)
 
   useEffect(() => {
@@ -38,10 +40,30 @@ function Home() {
     return () => { cancelled = true }
   }, [])
 
+  const handleModuleClick = async (moduleId) => {
+    setError(null)
+    setRulesAccepted(false)
+    try {
+      // Fetch module info and settings to show rules
+      const [moduleRes, settingsRes] = await Promise.all([
+        apiRequest(`/api/assessments/modules/${moduleId}`),
+        apiRequest(`/api/assessments/modules/${moduleId}/settings`)
+      ])
+      setRulesData({
+        module: moduleRes.module,
+        settings: settingsRes.settings
+      })
+    } catch (e) {
+      setError(e.response?.data?.message || e.message || 'Failed to load module information')
+    }
+  }
+
   const startTest = async (moduleId) => {
     setError(null)
     setResult(null)
     setAnswers({})
+    setRulesData(null)
+    setRulesAccepted(false)
     autoSubmitDone.current = false
     try {
       const data = await apiRequest(`/api/assessments/modules/${moduleId}/test`)
@@ -82,6 +104,8 @@ function Home() {
     setStartedAt(null)
     setAnswers({})
     setResult(null)
+    setRulesData(null)
+    setRulesAccepted(false)
   }
 
   const durationMinutes = testData?.settings?.durationMinutes ?? 60
@@ -132,8 +156,8 @@ function Home() {
     )
   }
 
-  // ----- Error (no testData) -----
-  if (error && !testData) {
+  // ----- Error (no testData, no rulesData) -----
+  if (error && !testData && !rulesData) {
     const is404 = typeof window !== 'undefined' && window.__lastAssessmentsStatus__ === 404
     return (
       <div className="max-w-md mx-auto py-8">
@@ -167,6 +191,126 @@ function Home() {
     { bg: 'bg-amber-500/10 dark:bg-amber-500/20', border: 'border-amber-200 dark:border-amber-800/50', icon: 'text-amber-600 dark:text-amber-400', label: 'text-amber-600 dark:text-amber-400' }
   ]
 
+  // Default rules/terms if module doesn't have custom rules
+  const defaultRules = [
+    'You must complete the assessment independently without external assistance.',
+    'Do not share your session, questions, or answers with anyone.',
+    'The assessment is timed. Ensure you have a stable internet connection.',
+    'Do not navigate away from the assessment page or open other tabs during the exam.',
+    'All answers are final once submitted. Review your responses before submitting.',
+    'Any attempt to cheat, copy, or share content will result in disqualification.',
+    'Your session is monitored and recorded for security purposes.',
+    'By proceeding, you agree to abide by all assessment rules and regulations.'
+  ]
+
+  // ----- Rules Acceptance Page -----
+  if (rulesData && !testData) {
+    const rules = rulesData.settings?.rules
+      ? rulesData.settings.rules.split('\n').filter(Boolean)
+      : defaultRules
+    const duration = rulesData.settings?.durationMinutes || 60
+    const totalQuestions = rulesData.settings?.totalQuestions || 20
+
+    return (
+      <div className="max-w-2xl mx-auto">
+        <div className="mb-4">
+          <h1 className="text-sm font-semibold text-slate-900 dark:text-white">Rules & Regulations</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Please read and accept the terms to proceed</p>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 text-xs text-red-700 dark:text-red-300">
+            {error}
+            <button
+              onClick={() => {
+                setError(null)
+                handleModuleClick(rulesData.module._id || rulesData.module.id)
+              }}
+              className="ml-2 underline"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+          {/* Module info header */}
+          <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-slate-900 dark:text-white">{rulesData.module?.name}</span>
+              <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+                <span>{duration} min</span>
+                <span>•</span>
+                <span>{totalQuestions} questions</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Rules content */}
+          <div className="p-5 max-h-[60vh] overflow-y-auto">
+            <div className="space-y-3">
+              <div className="flex items-start gap-2">
+                <ShieldIcon className="w-4 h-4 text-indigo-600 dark:text-indigo-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h2 className="text-xs font-semibold text-slate-900 dark:text-white mb-2">Assessment Rules & Regulations</h2>
+                  <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-400">
+                    {rules.map((rule, i) => (
+                      <li key={i} className="flex items-start gap-2">
+                        <span className="text-indigo-600 dark:text-indigo-400 flex-shrink-0 mt-0.5">•</span>
+                        <span>{rule}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Acceptance checkbox */}
+          <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={rulesAccepted}
+                onChange={(e) => setRulesAccepted(e.target.checked)}
+                className="mt-0.5 w-4 h-4 text-indigo-600 border-slate-300 dark:border-slate-600 rounded focus:ring-indigo-500"
+              />
+              <span className="text-xs text-slate-700 dark:text-slate-300">
+                I have read and understood all the rules and regulations. I agree to comply with all terms and conditions stated above.
+              </span>
+            </label>
+          </div>
+
+          {/* Actions */}
+          <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
+            <button
+              onClick={() => {
+                setRulesData(null)
+                setRulesAccepted(false)
+                setError(null)
+              }}
+              className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-800"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => startTest(rulesData.module._id || rulesData.module.id)}
+              disabled={!rulesAccepted}
+              className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg"
+            >
+              Accept & Start Assessment
+            </button>
+          </div>
+        </div>
+
+        <p className="mt-4 text-center text-xs text-slate-400 dark:text-slate-500 flex items-center justify-center gap-1">
+          <LockIcon className="w-3 h-3" />
+          Your session is secure and monitored.
+        </p>
+      </div>
+    )
+  }
+
   // ----- Dashboard: Module list (content only; layout provides header + sidebar) -----
   if (!testData) {
     return (
@@ -189,7 +333,7 @@ function Home() {
               return (
                 <button
                   key={mod._id || mod.id}
-                  onClick={() => startTest(mod._id || mod.id)}
+                  onClick={() => handleModuleClick(mod._id || mod.id)}
                   className={`group w-full text-left bg-white dark:bg-slate-900 rounded-xl border ${color.border} p-4 shadow-sm hover:shadow-md transition-all duration-200`}
                 >
                   <div className="flex items-center gap-3">
