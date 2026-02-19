@@ -24,10 +24,12 @@ function Home() {
     let cancelled = false
     async function load() {
       try {
+        if (typeof window !== 'undefined') window.__lastAssessmentsStatus__ = undefined
         const data = await apiRequest('/api/assessments/modules')
         if (!cancelled) setModules(data.modules || [])
       } catch (e) {
-        if (!cancelled) setError(e.message || 'Failed to load modules')
+        if (typeof window !== 'undefined' && e.response?.status) window.__lastAssessmentsStatus__ = e.response.status
+        if (!cancelled) setError(e.response?.data?.message || e.message || 'Failed to load modules')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -107,10 +109,16 @@ function Home() {
   }
 
   if (error && !testData) {
+    const is404 = typeof window !== 'undefined' && window.__lastAssessmentsStatus__ === 404
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-6 max-w-md">
           <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>
+          {is404 && (
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              The assessment API is not available (404). Ensure the backend is deployed with assessment routes and that the server proxies <code className="text-xs bg-gray-100 dark:bg-gray-700 px-1 rounded">/api/assessments</code> to the Node app.
+            </p>
+          )}
           <button
             onClick={() => { setError(null); setLoading(true); setTimeout(() => setLoading(false), 500) }}
             className="px-4 py-2 bg-indigo-600 text-white rounded-lg"
