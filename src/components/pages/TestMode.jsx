@@ -25,6 +25,7 @@ function TestMode() {
   const [inactivityWarning, setInactivityWarning] = useState(false)
   const [tabSwitchCount, setTabSwitchCount] = useState(0)
   const [examEnded, setExamEnded] = useState(false)
+  const [currentTime, setCurrentTime] = useState(Date.now())
   
   const autoSubmitDone = useRef(false)
   const videoRef = useRef(null)
@@ -99,8 +100,14 @@ function TestMode() {
         setCameraActive(true)
         setMicActive(true)
         
+        // Set video source and ensure it plays
         if (videoRef.current) {
           videoRef.current.srcObject = stream
+          videoRef.current.onloadedmetadata = () => {
+            videoRef.current?.play().catch(err => {
+              console.error('Error playing video:', err)
+            })
+          }
         }
       } catch (err) {
         console.error('Error accessing media devices:', err)
@@ -116,6 +123,16 @@ function TestMode() {
       }
     }
   }, [testData, result, examEnded])
+
+  // Update video element when stream changes
+  useEffect(() => {
+    if (videoRef.current && streamRef.current && !videoRef.current.srcObject) {
+      videoRef.current.srcObject = streamRef.current
+      videoRef.current.play().catch(err => {
+        console.error('Error playing video:', err)
+      })
+    }
+  }, [cameraActive])
 
   // Inactivity detection (30 seconds)
   useEffect(() => {
@@ -282,8 +299,19 @@ function TestMode() {
     }
   }
 
+  // Dynamic timer - update every second
+  useEffect(() => {
+    if (!startedAt || result || examEnded) return
+
+    const timerInterval = setInterval(() => {
+      setCurrentTime(Date.now())
+    }, 1000)
+
+    return () => clearInterval(timerInterval)
+  }, [startedAt, result, examEnded])
+
   const durationMinutes = testData?.settings?.durationMinutes ?? 60
-  const elapsedMs = startedAt ? Date.now() - startedAt : 0
+  const elapsedMs = startedAt ? currentTime - startedAt : 0
   const remainingSeconds = Math.max(0, durationMinutes * 60 - Math.floor(elapsedMs / 1000))
   const timeUp = remainingSeconds === 0 && startedAt
 
@@ -409,29 +437,6 @@ function TestMode() {
 
   return (
     <div className="fixed inset-0 bg-slate-50 dark:bg-slate-900 overflow-y-auto z-40">
-      {/* Camera preview (small, top-right) */}
-      {cameraActive && (
-        <div className="fixed top-4 right-4 z-50 w-32 h-24 bg-slate-900 rounded-lg border-2 border-indigo-500 overflow-hidden shadow-lg">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover"
-          />
-          <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[10px] px-1 py-0.5 flex items-center justify-between">
-            <span className="flex items-center gap-1">
-              <span className={`w-1.5 h-1.5 rounded-full ${cameraActive ? 'bg-green-400' : 'bg-red-400'}`} />
-              Camera
-            </span>
-            <span className="flex items-center gap-1">
-              <span className={`w-1.5 h-1.5 rounded-full ${micActive ? 'bg-green-400' : 'bg-red-400'}`} />
-              Mic
-            </span>
-          </div>
-        </div>
-      )}
-
       {/* Top bar - Timer and module name */}
       <div className="sticky top-0 z-30 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -446,6 +451,29 @@ function TestMode() {
           </div>
         </div>
       </div>
+
+      {/* Camera preview (below header, top-right) */}
+      {cameraActive && (
+        <div className="fixed top-[57px] right-4 z-50 w-32 h-24 bg-slate-900 rounded-lg border-2 border-indigo-500 overflow-hidden shadow-lg">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full h-full object-cover bg-black"
+          />
+          <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[10px] px-1 py-0.5 flex items-center justify-between">
+            <span className="flex items-center gap-1">
+              <span className={`w-1.5 h-1.5 rounded-full ${cameraActive ? 'bg-green-400' : 'bg-red-400'}`} />
+              Camera
+            </span>
+            <span className="flex items-center gap-1">
+              <span className={`w-1.5 h-1.5 rounded-full ${micActive ? 'bg-green-400' : 'bg-red-400'}`} />
+              Mic
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Inactivity warning */}
       {inactivityWarning && (
