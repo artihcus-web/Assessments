@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { apiRequest } from '../../utils/api'
 
@@ -32,6 +32,8 @@ function TestMode() {
   const inactivityTimerRef = useRef(null)
   const lastActivityRef = useRef(Date.now())
   const visibilityChangeRef = useRef(null)
+  const testDataRef = useRef(null)
+  const answersRef = useRef({})
 
   // Prevent back navigation
   useEffect(() => {
@@ -180,7 +182,7 @@ function TestMode() {
         document.removeEventListener('visibilitychange', visibilityChangeRef.current)
       }
     }
-  }, [testData, result, examEnded, endExamAutomatically])
+  }, [testData, result, examEnded])
 
   // Load test data
   useEffect(() => {
@@ -194,6 +196,7 @@ function TestMode() {
       try {
         const data = await apiRequest(`/api/assessments/modules/${moduleId}/test`)
         setTestData(data)
+        testDataRef.current = data
         setStartedAt(Date.now())
       } catch (e) {
         setError(e.response?.data?.message || e.message || 'Failed to load test')
@@ -205,7 +208,17 @@ function TestMode() {
     loadTest()
   }, [moduleId])
 
-  const endExamAutomatically = useCallback(async (reason) => {
+  // Update refs when state changes
+  useEffect(() => {
+    testDataRef.current = testData
+  }, [testData])
+
+  useEffect(() => {
+    answersRef.current = answers
+  }, [answers])
+
+  // Define endExamAutomatically function that uses refs to avoid circular dependencies
+  const endExamAutomatically = async (reason) => {
     if (examEnded || autoSubmitDone.current) return
     setExamEnded(true)
     autoSubmitDone.current = true
@@ -214,13 +227,16 @@ function TestMode() {
       streamRef.current.getTracks().forEach(track => track.stop())
     }
 
-    if (testData?.module?._id && answers) {
+    const currentTestData = testDataRef.current
+    const currentAnswers = answersRef.current
+
+    if (currentTestData?.module?._id && currentAnswers) {
       try {
-        const answerList = (testData.questions || []).map(q => ({
+        const answerList = (currentTestData.questions || []).map(q => ({
           questionId: q._id,
-          value: answers[q._id] ?? ''
+          value: currentAnswers[q._id] ?? ''
         }))
-        await apiRequest(`/api/assessments/modules/${testData.module._id}/submit`, {
+        await apiRequest(`/api/assessments/modules/${currentTestData.module._id}/submit`, {
           method: 'POST',
           body: JSON.stringify({ answers: answerList })
         })
@@ -231,7 +247,7 @@ function TestMode() {
 
     alert(reason)
     navigate('/assessments-dashboard', { replace: true })
-  }, [examEnded, testData, answers, navigate])
+  }
 
   const setAnswer = (questionId, value) => {
     setAnswers(prev => ({ ...prev, [questionId]: value }))
@@ -282,12 +298,17 @@ function TestMode() {
       streamRef.current.getTracks().forEach(track => track.stop())
     }
 
-    const answerList = (testData.questions || []).map(q => ({ questionId: q._id, value: answers[q._id] ?? '' }))
-    apiRequest(`/api/assessments/modules/${testData.module._id}/submit`, {
-      method: 'POST',
-      body: JSON.stringify({ answers: answerList })
-    }).then(setResult).catch(() => setError('Auto-submit failed'))
-  }, [remainingSeconds, startedAt, testData, result, answers, examEnded])
+    const currentTestData = testDataRef.current
+    const currentAnswers = answersRef.current
+
+    if (currentTestData?.module?._id) {
+      const answerList = (currentTestData.questions || []).map(q => ({ questionId: q._id, value: currentAnswers[q._id] ?? '' }))
+      apiRequest(`/api/assessments/modules/${currentTestData.module._id}/submit`, {
+        method: 'POST',
+        body: JSON.stringify({ answers: answerList })
+      }).then(setResult).catch(() => setError('Auto-submit failed'))
+    }
+  }, [remainingSeconds, startedAt, testData, result, examEnded])
 
   // Loading state
   if (loading) {
