@@ -1,6 +1,7 @@
 import React from 'react'
 import Home from '../pages/Home'
 import KnowledgeBase from '../pages/KnowledgeBase'
+import TestMode from '../pages/TestMode'
 import Products from '../pages/Products'
 import Contact from '../pages/Contact'
 import Cart from '../pages/Cart'
@@ -20,6 +21,11 @@ function Routers() {
               <Route index element={<Home />} />
               <Route path="knowledge-base" element={<KnowledgeBase />} />
             </Route>
+            <Route path="/test-mode/:moduleId" element={
+              <AssessmentProtectedRoute>
+                <TestMode />
+              </AssessmentProtectedRoute>
+            } />
             <Route path='/products' element={<Products />} />
             <Route path='/contact' element={<Contact />} />
             <Route path='/cart' element={<Cart />} />
