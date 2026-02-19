@@ -26,6 +26,7 @@ function TestMode() {
   const [tabSwitchCount, setTabSwitchCount] = useState(0)
   const [examEnded, setExamEnded] = useState(false)
   const [currentTime, setCurrentTime] = useState(Date.now())
+  const [showTabSwitchWarning, setShowTabSwitchWarning] = useState(false)
   
   const autoSubmitDone = useRef(false)
   const videoRef = useRef(null)
@@ -36,20 +37,46 @@ function TestMode() {
   const testDataRef = useRef(null)
   const answersRef = useRef({})
 
-  // Prevent back navigation
+  // Prevent back navigation and disable context menu
   useEffect(() => {
     // Push a new state to prevent back navigation
     window.history.pushState(null, '', window.location.href)
     
     const handlePopState = () => {
       window.history.pushState(null, '', window.location.href)
-      alert('You cannot navigate away during the exam. The exam will continue.')
+      setShowTabSwitchWarning(true)
+    }
+
+    // Disable right-click context menu
+    const handleContextMenu = (e) => {
+      e.preventDefault()
+      return false
+    }
+
+    // Disable common keyboard shortcuts
+    const handleKeyDownShortcuts = (e) => {
+      // Disable F5 (refresh), Ctrl+R, Ctrl+Shift+R
+      if (e.key === 'F5' || (e.ctrlKey && e.key === 'r') || (e.ctrlKey && e.shiftKey && e.key === 'R')) {
+        e.preventDefault()
+        setShowTabSwitchWarning(true)
+        return false
+      }
+      // Disable Ctrl+W (close tab), Ctrl+T (new tab)
+      if (e.ctrlKey && (e.key === 'w' || e.key === 't')) {
+        e.preventDefault()
+        setShowTabSwitchWarning(true)
+        return false
+      }
     }
     
     window.addEventListener('popstate', handlePopState)
+    document.addEventListener('contextmenu', handleContextMenu)
+    document.addEventListener('keydown', handleKeyDownShortcuts)
     
     return () => {
       window.removeEventListener('popstate', handlePopState)
+      document.removeEventListener('contextmenu', handleContextMenu)
+      document.removeEventListener('keydown', handleKeyDownShortcuts)
     }
   }, [])
 
@@ -169,37 +196,71 @@ function TestMode() {
     }
   }, [testData, result, examEnded])
 
-  // Tab switching detection
+  // Strict tab switching, ESC key, and tab close detection
   useEffect(() => {
     if (!testData || result || examEnded) return
 
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        setTabSwitchCount(prev => {
-          const newCount = prev + 1
-          
-          if (newCount >= 3) {
-            setTimeout(() => {
-              endExamAutomatically('Exam terminated: Multiple tab switches detected.')
-            }, 100)
-          } else {
-            alert(`Warning: You have switched tabs ${newCount} time(s). After 3 tab switches, the exam will automatically end.`)
-          }
-          
-          return newCount
-        })
+    // Handle ESC key press
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !showTabSwitchWarning) {
+        e.preventDefault()
+        e.stopPropagation()
+        setShowTabSwitchWarning(true)
       }
     }
 
+    // Handle tab/window visibility change
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setShowTabSwitchWarning(true)
+      }
+    }
+
+    // Handle tab close attempt
+    const handleBeforeUnload = (e) => {
+      e.preventDefault()
+      e.returnValue = 'You are trying to leave the exam. If you continue, your test will be automatically submitted and you cannot retake it.'
+      return e.returnValue
+    }
+
+    // Handle window blur (focus loss)
+    const handleBlur = () => {
+      if (document.hasFocus() === false) {
+        setShowTabSwitchWarning(true)
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
     document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    window.addEventListener('blur', handleBlur)
     visibilityChangeRef.current = handleVisibilityChange
 
     return () => {
+      document.removeEventListener('keydown', handleKeyDown)
       if (visibilityChangeRef.current) {
         document.removeEventListener('visibilitychange', visibilityChangeRef.current)
       }
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      window.removeEventListener('blur', handleBlur)
     }
-  }, [testData, result, examEnded])
+  }, [testData, result, examEnded, showTabSwitchWarning])
+
+  // Handle tab switch warning confirmation
+  const handleTabSwitchConfirm = () => {
+    setShowTabSwitchWarning(false)
+    endExamAutomatically('Your test has been automatically submitted due to tab switching or leaving the exam. You cannot retake this test.')
+  }
+
+  const handleTabSwitchCancel = () => {
+    setShowTabSwitchWarning(false)
+    // Focus back to the window and bring it to front
+    window.focus()
+    if (document.hasFocus()) {
+      // User stayed on the page
+      setTabSwitchCount(prev => prev + 1)
+    }
+  }
 
   // Load test data
   useEffect(() => {
@@ -471,6 +532,62 @@ function TestMode() {
               <span className={`w-1.5 h-1.5 rounded-full ${micActive ? 'bg-green-400' : 'bg-red-400'}`} />
               Mic
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Tab switch warning modal */}
+      {showTabSwitchWarning && (
+        <div 
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-[100] p-4"
+          onClick={(e) => {
+            // Prevent closing by clicking outside
+            e.stopPropagation()
+          }}
+        >
+          <div 
+            className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-md w-full border-2 border-red-500"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">Warning: Tab Switch Detected</h2>
+              </div>
+              
+              <div className="mb-6 space-y-3">
+                <p className="text-sm text-slate-700 dark:text-slate-300">
+                  You are trying to switch tabs, close the window, or press ESC during the exam.
+                </p>
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+                  <p className="text-sm font-semibold text-red-800 dark:text-red-200 mb-1">Important Notice:</p>
+                  <ul className="text-xs text-red-700 dark:text-red-300 space-y-1 list-disc list-inside">
+                    <li>If you continue, your test will be <strong>automatically submitted</strong></li>
+                    <li>You <strong>cannot retake</strong> this test</li>
+                    <li>Your current progress will be saved</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleTabSwitchCancel}
+                  className="flex-1 px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Stay on Exam
+                </button>
+                <button
+                  onClick={handleTabSwitchConfirm}
+                  className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-lg transition-colors"
+                >
+                  Continue & Submit
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
