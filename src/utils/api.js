@@ -5,6 +5,7 @@ export async function apiRequest(path, options = {}) {
   const url = path.startsWith('http') ? path : `${base}${path}`
   const res = await fetch(url, {
     ...options,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...options.headers

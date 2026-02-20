@@ -41,11 +41,15 @@ export default function KnowledgeBase() {
         ])
         if (!cancelled) {
           setModules(modulesRes.modules || [])
-          setNotes(notesRes.items || [])
+          setNotes(Array.isArray(notesRes?.items) ? notesRes.items : (notesRes?.data || []))
         }
       } catch (e) {
         if (!cancelled) {
-          setError(e.response?.data?.message || e.message || 'Failed to load knowledge base')
+          const status = e.response?.status
+          const msg = e.response?.data?.message || e.message || 'Failed to load knowledge base'
+          setError(status === 404
+            ? 'Knowledge base not available (404). Ensure the API has been deployed with the latest backend.'
+            : msg)
           setNotes([])
           setModules([])
         }
