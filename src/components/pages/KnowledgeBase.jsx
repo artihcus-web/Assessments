@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { apiRequest } from '../../utils/api'
 import { getApiBaseUrl } from '../../config/apiConfig'
 
@@ -14,44 +14,134 @@ const FileIcon = ({ className = 'w-5 h-5' }) => (
   </svg>
 )
 
-const DownloadIcon = ({ className = 'w-4 h-4' }) => (
+const LockIcon = ({ className = 'w-4 h-4' }) => (
   <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
   </svg>
 )
 
+// Secure document viewer: view-only, no copy/download/screenshot (best-effort in browser)
+function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose }) {
+  const viewerRef = useRef(null)
+  const baseUrl = getApiBaseUrl()
+  const viewUrl = `${baseUrl}/api/assessments/knowledge-requests/${requestId}/view?employeeId=${encodeURIComponent(employeeId)}`
+
+  const preventDefault = useCallback((e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    return false
+  }, [])
+
+  const handleKeyDown = useCallback((e) => {
+    if (e.ctrlKey || e.metaKey) {
+      const key = (e.key || '').toLowerCase()
+      if (key === 's' || key === 'c' || key === 'p' || key === 'u' || key === 'a') {
+        e.preventDefault()
+        return false
+      }
+    }
+    if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C'))) {
+      e.preventDefault()
+      return false
+    }
+  }, [])
+
+  useEffect(() => {
+    const ctx = (e) => preventDefault(e)
+    const copy = (e) => preventDefault(e)
+    const key = (e) => handleKeyDown(e)
+    document.addEventListener('contextmenu', ctx)
+    document.addEventListener('copy', copy)
+    document.addEventListener('cut', copy)
+    document.addEventListener('keydown', key)
+    document.body.style.userSelect = 'none'
+    document.body.style.webkitUserSelect = 'none'
+    return () => {
+      document.removeEventListener('contextmenu', ctx)
+      document.removeEventListener('copy', copy)
+      document.removeEventListener('cut', copy)
+      document.removeEventListener('keydown', key)
+      document.body.style.userSelect = ''
+      document.body.style.webkitUserSelect = ''
+    }
+  }, [preventDefault, handleKeyDown])
+
+  return (
+    <div
+      ref={viewerRef}
+      className="fixed inset-0 z-[100] flex flex-col bg-slate-900"
+      style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
+      onContextMenu={preventDefault}
+      onCopy={preventDefault}
+      onCut={preventDefault}
+    >
+      <div className="flex items-center justify-between px-4 py-2 bg-slate-800 border-b border-slate-700 flex-shrink-0">
+        <div className="flex items-center gap-2 text-white">
+          <LockIcon className="w-5 h-5 text-emerald-400" />
+          <span className="font-medium text-sm">Secure view only — no copy, download, or print</span>
+          {documentTitle && <span className="text-slate-400 text-sm truncate max-w-[200px]"> · {documentTitle}</span>}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium"
+        >
+          Close
+        </button>
+      </div>
+      <div className="flex-1 min-h-0 relative" onContextMenu={preventDefault}>
+        <iframe
+          title="Document view"
+          src={viewUrl}
+          className="w-full h-full border-0 bg-white"
+          sandbox="allow-same-origin allow-scripts"
+          allow="fullscreen"
+        />
+      </div>
+    </div>
+  )
+}
+
 export default function KnowledgeBase() {
-  const [modules, setModules] = useState([])
-  const [notes, setNotes] = useState([])
+  const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [selectedModuleId, setSelectedModuleId] = useState('')
+  const [submitSuccess, setSubmitSuccess] = useState(null)
+  const [description, setDescription] = useState('')
+  const [title, setTitle] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [viewingRequest, setViewingRequest] = useState(null)
+  const [employeeId, setEmployeeId] = useState('')
 
   const baseUrl = getApiBaseUrl()
 
   useEffect(() => {
+    try {
+      const session = sessionStorage.getItem('assessments_approved')
+      const parsed = JSON.parse(session || '{}')
+      if (parsed?.employeeId) setEmployeeId(parsed.employeeId)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!employeeId) {
+      setLoading(false)
+      setRequests([])
+      return
+    }
     let cancelled = false
     async function load() {
       try {
         setLoading(true)
         setError(null)
-        const [modulesRes, notesRes] = await Promise.all([
-          apiRequest('/api/assessments/modules'),
-          apiRequest('/api/assessments/knowledge-base')
-        ])
-        if (!cancelled) {
-          setModules(modulesRes.modules || [])
-          setNotes(Array.isArray(notesRes?.items) ? notesRes.items : (notesRes?.data || []))
-        }
+        const data = await apiRequest(`/api/assessments/knowledge-requests/my?employeeId=${encodeURIComponent(employeeId)}`)
+        if (!cancelled) setRequests(data.requests || [])
       } catch (e) {
         if (!cancelled) {
-          const status = e.response?.status
-          const msg = e.response?.data?.message || e.message || 'Failed to load knowledge base'
-          setError(status === 404
-            ? 'Knowledge base not available (404). Ensure the API has been deployed with the latest backend.'
-            : msg)
-          setNotes([])
-          setModules([])
+          setError(e.response?.data?.message || e.message || 'Failed to load your requests')
+          setRequests([])
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -59,24 +149,71 @@ export default function KnowledgeBase() {
     }
     load()
     return () => { cancelled = true }
-  }, [])
+  }, [employeeId])
 
-  const filteredNotes = selectedModuleId
-    ? notes.filter(n => String(n.moduleId) === String(selectedModuleId))
-    : notes
+  const handleSubmitRequest = async (e) => {
+    e.preventDefault()
+    const desc = (description || '').trim()
+    if (!desc) {
+      setError('Please describe the document or content you need (e.g. policy, handbook, course material).')
+      return
+    }
+    if (!employeeId) {
+      setError('Session missing. Please log in again from the Assessments portal.')
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    setSubmitSuccess(null)
+    try {
+      await apiRequest('/api/assessments/knowledge-requests', {
+        method: 'POST',
+        body: JSON.stringify({
+          employeeId,
+          description: desc,
+          title: (title || '').trim() || undefined
+        })
+      })
+      setSubmitSuccess('Request submitted. An admin will review and upload the document when ready.')
+      setDescription('')
+      setTitle('')
+      const data = await apiRequest(`/api/assessments/knowledge-requests/my?employeeId=${encodeURIComponent(employeeId)}`)
+      setRequests(data.requests || [])
+    } catch (e) {
+      setError(e.response?.data?.message || e.message || 'Failed to submit request')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
-  const notesByModule = filteredNotes.reduce((acc, note) => {
-    const key = note.moduleName || 'Other'
-    if (!acc[key]) acc[key] = []
-    acc[key].push(note)
-    return acc
-  }, {})
+  if (!employeeId) {
+    return (
+      <div className="max-w-2xl">
+        <h1 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Knowledge Base</h1>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Request documents and view approved content.</p>
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4 text-sm text-amber-800 dark:text-amber-200">
+          Please use the Assessments portal and request access first. Your session is required to request and view documents.
+        </div>
+      </div>
+    )
+  }
+
+  if (viewingRequest) {
+    return (
+      <SecureDocumentViewer
+        requestId={viewingRequest._id || viewingRequest.id}
+        employeeId={employeeId}
+        documentTitle={viewingRequest.documentTitle || viewingRequest.title}
+        onClose={() => setViewingRequest(null)}
+      />
+    )
+  }
 
   if (loading) {
     return (
       <div className="max-w-2xl">
         <h1 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Knowledge Base</h1>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Reference materials and guides for your assessments.</p>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Request documents and view approved content.</p>
         <div className="flex items-center justify-center py-12">
           <div className="w-8 h-8 border-2 border-slate-200 dark:border-slate-700 border-t-indigo-600 rounded-full animate-spin" />
         </div>
@@ -84,82 +221,118 @@ export default function KnowledgeBase() {
     )
   }
 
-  if (error) {
-    return (
-      <div className="max-w-2xl">
-        <h1 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Knowledge Base</h1>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Reference materials and guides for your assessments.</p>
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-6 text-center">
-          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="max-w-2xl">
-      <h1 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Knowledge Base</h1>
-      <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Reference materials and notes by module. View or download to study.</p>
+    <div className="max-w-2xl space-y-8">
+      <div>
+        <h1 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Knowledge Base</h1>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Request any book, document, or content related to the organization (policies, handbooks, course material, etc.). When approved, you can view it securely — no download or copy.
+        </p>
+      </div>
 
-      {notes.length === 0 ? (
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-8 text-center">
-          <BookIcon className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
-          <p className="text-sm text-slate-600 dark:text-slate-400">No notes available yet.</p>
-          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Check back later or contact your administrator.</p>
-        </div>
-      ) : (
-        <>
-          {modules.length > 1 && (
-            <div className="mb-4">
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Filter by module</label>
-              <select
-                value={selectedModuleId}
-                onChange={e => setSelectedModuleId(e.target.value)}
-                className="w-full sm:w-auto px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-sm"
-              >
-                <option value="">All modules</option>
-                {modules.map(mod => (
-                  <option key={mod._id || mod.id} value={mod._id || mod.id}>{mod.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-          <div className="space-y-6">
-            {Object.entries(notesByModule).map(([moduleName, items]) => (
-              <div key={moduleName} className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
-                  <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{moduleName}</h2>
-                </div>
-                <ul className="divide-y divide-slate-200 dark:divide-slate-700">
-                  {items.map(note => {
-                    const downloadUrl = `${baseUrl}/api/assessments/knowledge-base/${note._id || note.id}/download`
-                    return (
-                      <li key={note._id || note.id} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/30">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <FileIcon className="w-5 h-5 text-indigo-500 flex-shrink-0" />
-                          <div className="min-w-0">
-                            <p className="font-medium text-slate-900 dark:text-white truncate">{note.title || note.fileName}</p>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{note.fileName}</p>
-                          </div>
-                        </div>
-                        <a
-                          href={downloadUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-sm font-medium hover:bg-indigo-100 dark:hover:bg-indigo-900/50 flex-shrink-0"
-                        >
-                          <DownloadIcon />
-                          View / Download
-                        </a>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            ))}
+      {/* Request form */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+        <h2 className="text-sm font-semibold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
+          <BookIcon className="w-5 h-5 text-indigo-500" />
+          Request a document
+        </h2>
+        <form onSubmit={handleSubmitRequest} className="space-y-3">
+          <div>
+            <label htmlFor="kb-title" className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Short title (optional)</label>
+            <input
+              id="kb-title"
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="e.g. HR Policy Handbook"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-800/50 text-slate-900 dark:text-white text-sm placeholder-slate-400"
+            />
           </div>
-        </>
-      )}
+          <div>
+            <label htmlFor="kb-desc" className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Description *</label>
+            <textarea
+              id="kb-desc"
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Clearly describe what you need: e.g. 'Employee handbook 2024', 'Directors list and roles', 'Safety policy PDF', 'Training course material for Module X'..."
+              rows={4}
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-800/50 text-slate-900 dark:text-white text-sm placeholder-slate-400"
+              required
+            />
+          </div>
+          {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+          {submitSuccess && <p className="text-sm text-emerald-600 dark:text-emerald-400">{submitSuccess}</p>}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg"
+          >
+            {submitting ? 'Submitting…' : 'Submit request'}
+          </button>
+        </form>
+      </div>
+
+      {/* My requests */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+            <FileIcon className="w-5 h-5 text-indigo-500" />
+            My requests
+          </h2>
+        </div>
+        {requests.length === 0 ? (
+          <div className="p-8 text-center">
+            <p className="text-sm text-slate-600 dark:text-slate-400">No requests yet.</p>
+            <p className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">Submit a request above; when admin approves and uploads, you can view it here (view-only).</p>
+          </div>
+        ) : (
+          <ul className="divide-y divide-slate-200 dark:divide-slate-700">
+            {requests.map(req => {
+              const id = req._id || req.id
+              const isApproved = req.status === 'approved'
+              const isPending = req.status === 'pending'
+              const isRejected = req.status === 'rejected'
+              return (
+                <li key={id} className="px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-slate-900 dark:text-white text-sm">{req.title || 'Document request'}</p>
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-2">{req.description}</p>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <span className={`text-xs px-2 py-0.5 rounded ${
+                          isPending ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' :
+                          isApproved ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' :
+                          'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                        }`}>
+                          {req.status}
+                        </span>
+                        <span className="text-xs text-slate-400 dark:text-slate-500">
+                          {req.createdAt ? new Date(req.createdAt).toLocaleDateString() : ''}
+                        </span>
+                      </div>
+                    </div>
+                    {isApproved && (
+                      <button
+                        type="button"
+                        onClick={() => setViewingRequest(req)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-sm font-medium hover:bg-indigo-100 dark:hover:bg-indigo-900/50 flex-shrink-0"
+                      >
+                        <LockIcon className="w-4 h-4" />
+                        View (secure)
+                      </button>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
+
+      <p className="text-center text-xs text-slate-400 dark:text-slate-500 flex items-center justify-center gap-1">
+        <LockIcon className="w-3 h-3" />
+        Approved documents are view-only. Copy, download, and print are disabled.
+      </p>
     </div>
   )
 }
