@@ -7,9 +7,17 @@ const POLL_INTERVAL_MS = 3000
 function Login() {
   const navigate = useNavigate()
   const [employeeId, setEmployeeId] = useState('')
+  const [departmentId, setDepartmentId] = useState('')
+  const [departments, setDepartments] = useState([])
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState(null)
   const [pendingEmployeeId, setPendingEmployeeId] = useState(null)
+
+  useEffect(() => {
+    apiRequest('/api/assessments/departments')
+      .then((data) => setDepartments(data.departments || []))
+      .catch(() => setDepartments([]))
+  }, [])
 
   // If already approved, go to dashboard and replace history so Back doesn't return to Login
   useEffect(() => {
@@ -30,13 +38,17 @@ function Login() {
       setMessage({ type: 'error', text: 'Please enter your Employee ID' })
       return
     }
+    if (!departmentId) {
+      setMessage({ type: 'error', text: 'Please select a Department' })
+      return
+    }
 
     setLoading(true)
     setMessage(null)
     try {
       const data = await apiRequest('/api/assessments/access-requests', {
         method: 'POST',
-        body: JSON.stringify({ employeeId: employeeId.trim() })
+        body: JSON.stringify({ employeeId: employeeId.trim(), departmentId: departmentId || undefined })
       })
 
       if (data.status === 'approved') {
@@ -109,6 +121,25 @@ function Login() {
             </p>
 
             <form onSubmit={handleRequestAccess} className="space-y-5">
+              <div>
+                <label htmlFor="departmentId" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Department
+                </label>
+                <select
+                  id="departmentId"
+                  value={departmentId}
+                  onChange={(e) => setDepartmentId(e.target.value)}
+                  className="w-full px-4 py-3 border border-slate-200 dark:border-slate-600 rounded-xl bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:focus:ring-indigo-400 dark:focus:border-indigo-400 transition-shadow"
+                  disabled={loading}
+                >
+                  <option value="">Select department</option>
+                  {departments.map((d) => (
+                    <option key={d._id || d.id} value={d._id || d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label htmlFor="employeeId" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   Employee ID

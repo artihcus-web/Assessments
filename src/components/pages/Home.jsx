@@ -4,10 +4,10 @@ import { apiRequest } from '../../utils/api'
 
 function Home() {
   const navigate = useNavigate()
-  const [modules, setModules] = useState([])
+  const [tests, setTests] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [rulesData, setRulesData] = useState(null) // { module, settings }
+  const [rulesData, setRulesData] = useState(null) // { test, settings }
   const [rulesAccepted, setRulesAccepted] = useState(false)
 
   useEffect(() => {
@@ -15,11 +15,11 @@ function Home() {
     async function load() {
       try {
         if (typeof window !== 'undefined') window.__lastAssessmentsStatus__ = undefined
-        const data = await apiRequest('/api/assessments/modules')
-        if (!cancelled) setModules(data.modules || [])
+        const data = await apiRequest('/api/assessments/tests')
+        if (!cancelled) setTests(data.tests || [])
       } catch (e) {
         if (typeof window !== 'undefined' && e.response?.status) window.__lastAssessmentsStatus__ = e.response.status
-        if (!cancelled) setError(e.response?.data?.message || e.message || 'Failed to load modules')
+        if (!cancelled) setError(e.response?.data?.message || e.message || 'Failed to load assessments')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -28,27 +28,23 @@ function Home() {
     return () => { cancelled = true }
   }, [])
 
-  const handleModuleClick = async (moduleId) => {
+  const handleTestClick = async (testId) => {
     setError(null)
     setRulesAccepted(false)
     try {
-      // Fetch module info and settings to show rules
-      const [moduleRes, settingsRes] = await Promise.all([
-        apiRequest(`/api/assessments/modules/${moduleId}`),
-        apiRequest(`/api/assessments/modules/${moduleId}/settings`)
-      ])
+      const settingsRes = await apiRequest(`/api/assessments/tests/${testId}/settings`)
+      const test = tests.find(t => (t._id || t.id) === testId)
       setRulesData({
-        module: moduleRes.module,
+        test: test || { _id: testId, id: testId, name: 'Assessment' },
         settings: settingsRes.settings
       })
     } catch (e) {
-      setError(e.response?.data?.message || e.message || 'Failed to load module information')
+      setError(e.response?.data?.message || e.message || 'Failed to load assessment information')
     }
   }
 
-  const handleStartTest = (moduleId) => {
-    // Navigate to TestMode page
-    navigate(`/test-mode/${moduleId}`, { replace: true })
+  const handleStartTest = (testId) => {
+    navigate(`/test-mode/${testId}`, { replace: true })
   }
 
   // ----- Icons (inline SVG) -----
@@ -151,7 +147,7 @@ function Home() {
             <button
               onClick={() => {
                 setError(null)
-                handleModuleClick(rulesData.module._id || rulesData.module.id)
+                handleTestClick(rulesData.test._id || rulesData.test.id)
               }}
               className="ml-2 underline"
             >
@@ -161,10 +157,10 @@ function Home() {
         )}
 
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-          {/* Module info header */}
+          {/* Test info header */}
           <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-slate-900 dark:text-white">{rulesData.module?.name}</span>
+              <span className="text-sm font-semibold text-slate-900 dark:text-white">{rulesData.test?.name}</span>
               <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
                 <span>{duration} min</span>
                 <span>•</span>
@@ -221,7 +217,7 @@ function Home() {
               Cancel
             </button>
             <button
-              onClick={() => handleStartTest(rulesData.module._id || rulesData.module.id)}
+              onClick={() => handleStartTest(rulesData.test._id || rulesData.test.id)}
               disabled={!rulesAccepted}
               className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg"
             >
@@ -246,7 +242,7 @@ function Home() {
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Choose a module to start. Do not share your session.</p>
         </div>
 
-        {modules.length === 0 ? (
+        {tests.length === 0 ? (
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-8 text-center">
             <ClipboardIcon className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
             <p className="text-sm text-slate-600 dark:text-slate-400">No assessments available</p>
@@ -254,12 +250,13 @@ function Home() {
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {modules.map((mod, i) => {
+            {tests.map((test, i) => {
               const color = TILE_COLORS[i % TILE_COLORS.length]
+              const testId = test._id || test.id
               return (
                 <button
-                  key={mod._id || mod.id}
-                  onClick={() => handleModuleClick(mod._id || mod.id)}
+                  key={testId}
+                  onClick={() => handleTestClick(testId)}
                   className={`group w-full text-left bg-white dark:bg-slate-900 rounded-xl border ${color.border} p-4 shadow-sm hover:shadow-md transition-all duration-200`}
                 >
                   <div className="flex items-center gap-3">
@@ -267,9 +264,14 @@ function Home() {
                       <ClipboardIcon className={`w-4 h-4 ${color.icon}`} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <span className="font-semibold text-slate-900 dark:text-white text-sm block truncate">{mod.name}</span>
-                      {mod.description && (
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">{mod.description}</p>
+                      <span className="font-semibold text-slate-900 dark:text-white text-sm block truncate">{test.name}</span>
+                      {(test.departmentName || test.moduleName) && (
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
+                          {[test.departmentName, test.moduleName].filter(Boolean).join(' · ')}
+                        </p>
+                      )}
+                      {test.description && (
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">{test.description}</p>
                       )}
                     </div>
                     <ChevronRightIcon className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />

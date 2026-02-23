@@ -21,7 +21,7 @@ function Routers() {
               <Route index element={<Home />} />
               <Route path="knowledge-base" element={<KnowledgeBase />} />
             </Route>
-            <Route path="/test-mode/:moduleId" element={
+            <Route path="/test-mode/:testId" element={
               <AssessmentProtectedRoute>
                 <TestMode />
               </AssessmentProtectedRoute>

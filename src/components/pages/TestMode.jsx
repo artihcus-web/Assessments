@@ -11,7 +11,7 @@ const QUESTION_TYPES = {
 }
 
 function TestMode() {
-  const { moduleId } = useParams()
+  const { testId } = useParams()
   const navigate = useNavigate()
   const [testData, setTestData] = useState(null)
   const [answers, setAnswers] = useState({})
@@ -267,15 +267,15 @@ function TestMode() {
 
   // Load test data
   useEffect(() => {
-    if (!moduleId) {
-      setError('Module ID is required')
+    if (!testId) {
+      setError('Test ID is required')
       setLoading(false)
       return
     }
 
     const loadTest = async () => {
       try {
-        const data = await apiRequest(`/api/assessments/modules/${moduleId}/test`)
+        const data = await apiRequest(`/api/assessments/tests/${testId}/test`)
         setTestData(data)
         testDataRef.current = data
         setStartedAt(Date.now())
@@ -287,7 +287,7 @@ function TestMode() {
     }
 
     loadTest()
-  }, [moduleId])
+  }, [testId])
 
   // Update refs when state changes
   useEffect(() => {
@@ -311,13 +311,13 @@ function TestMode() {
     const currentTestData = testDataRef.current
     const currentAnswers = answersRef.current
 
-    if (currentTestData?.module?._id && currentAnswers) {
+    if (currentTestData?.test?._id && currentAnswers) {
       try {
         const answerList = (currentTestData.questions || []).map(q => ({
           questionId: q._id,
           value: currentAnswers[q._id] ?? ''
         }))
-        await apiRequest(`/api/assessments/modules/${currentTestData.module._id}/submit`, {
+        await apiRequest(`/api/assessments/tests/${currentTestData.test._id}/submit`, {
           method: 'POST',
           body: JSON.stringify({ answers: answerList })
         })
@@ -396,7 +396,7 @@ function TestMode() {
         questionId: q._id,
         value: answers[q._id] ?? ''
       }))
-      const data = await apiRequest(`/api/assessments/modules/${testData.module._id}/submit`, {
+      const data = await apiRequest(`/api/assessments/tests/${testData.test._id}/submit`, {
         method: 'POST',
         body: JSON.stringify({ answers: answerList })
       })
@@ -438,9 +438,9 @@ function TestMode() {
     const currentTestData = testDataRef.current
     const currentAnswers = answersRef.current
 
-    if (currentTestData?.module?._id) {
+    if (currentTestData?.test?._id) {
       const answerList = (currentTestData.questions || []).map(q => ({ questionId: q._id, value: currentAnswers[q._id] ?? '' }))
-      apiRequest(`/api/assessments/modules/${currentTestData.module._id}/submit`, {
+      apiRequest(`/api/assessments/tests/${currentTestData.test._id}/submit`, {
         method: 'POST',
         body: JSON.stringify({ answers: answerList })
       }).then(setResult).catch(() => setError('Auto-submit failed'))
