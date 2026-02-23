@@ -20,11 +20,53 @@ const LockIcon = ({ className = 'w-4 h-4' }) => (
   </svg>
 )
 
-// Secure document viewer: view-only, no copy/download/screenshot (best-effort in browser)
+// Secure document viewer: view-only. Load document via fetch + blob URL so the iframe
+// is same-origin and Chrome does not block it (cross-origin iframe can be blocked by X-Frame-Options).
 function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose }) {
   const viewerRef = useRef(null)
   const baseUrl = getApiBaseUrl()
   const viewUrl = `${baseUrl}/api/assessments/knowledge-requests/${requestId}/view?employeeId=${encodeURIComponent(employeeId)}`
+
+  const [blobUrl, setBlobUrl] = useState(null)
+  const [loadError, setLoadError] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let revoked = false
+    setLoading(true)
+    setLoadError(null)
+    setBlobUrl(null)
+
+    fetch(viewUrl, { credentials: 'include', method: 'GET' })
+      .then((res) => {
+        if (!res.ok) {
+          if (res.status === 403) throw new Error('You do not have access to this document.')
+          if (res.status === 404) throw new Error('Document not found.')
+          throw new Error(res.statusText || 'Failed to load document')
+        }
+        return res.blob()
+      })
+      .then((blob) => {
+        if (revoked) return
+        const url = URL.createObjectURL(blob)
+        setBlobUrl(url)
+        setLoading(false)
+      })
+      .catch((err) => {
+        if (!revoked) {
+          setLoadError(err.message || 'Failed to load document')
+          setLoading(false)
+        }
+      })
+
+    return () => {
+      revoked = true
+      setBlobUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return null
+      })
+    }
+  }, [viewUrl])
 
   const preventDefault = useCallback((e) => {
     e.preventDefault()
@@ -89,14 +131,35 @@ function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose })
           Close
         </button>
       </div>
-      <div className="flex-1 min-h-0 relative" onContextMenu={preventDefault}>
-        <iframe
-          title="Document view"
-          src={viewUrl}
-          className="w-full h-full border-0 bg-white"
-          sandbox="allow-same-origin allow-scripts"
-          allow="fullscreen"
-        />
+      <div className="flex-1 min-h-0 relative flex flex-col items-center justify-center" onContextMenu={preventDefault}>
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
+            <div className="w-10 h-10 border-2 border-slate-600 border-t-emerald-500 rounded-full animate-spin" />
+            <p className="ml-3 text-slate-400">Loading document…</p>
+          </div>
+        )}
+        {loadError && !loading && (
+          <div className="p-6 text-center max-w-md">
+            <p className="text-red-400 font-medium mb-2">Cannot display document</p>
+            <p className="text-slate-400 text-sm mb-4">{loadError}</p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm"
+            >
+              Close
+            </button>
+          </div>
+        )}
+        {blobUrl && !loadError && (
+          <iframe
+            title="Document view"
+            src={blobUrl}
+            className="w-full h-full border-0 bg-white"
+            sandbox="allow-same-origin allow-scripts"
+            allow="fullscreen"
+          />
+        )}
       </div>
     </div>
   )
