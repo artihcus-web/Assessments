@@ -20,14 +20,15 @@ const LockIcon = ({ className = 'w-4 h-4' }) => (
   </svg>
 )
 
-// Secure document viewer: view-only. Load document via fetch + blob URL so the iframe
-// is same-origin and Chrome does not block it (cross-origin iframe can be blocked by X-Frame-Options).
+// Secure document viewer: view-only. Load document via fetch + blob URL.
+// Use <object> for PDFs so Chrome doesn't block (Chrome often blocks PDF in sandboxed iframes).
 function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose }) {
   const viewerRef = useRef(null)
   const baseUrl = getApiBaseUrl()
   const viewUrl = `${baseUrl}/api/assessments/knowledge-requests/${requestId}/view?employeeId=${encodeURIComponent(employeeId)}`
 
   const [blobUrl, setBlobUrl] = useState(null)
+  const [mimeType, setMimeType] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -36,6 +37,7 @@ function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose })
     setLoading(true)
     setLoadError(null)
     setBlobUrl(null)
+    setMimeType(null)
 
     fetch(viewUrl, { credentials: 'include', method: 'GET' })
       .then((res) => {
@@ -44,12 +46,14 @@ function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose })
           if (res.status === 404) throw new Error('Document not found.')
           throw new Error(res.statusText || 'Failed to load document')
         }
-        return res.blob()
+        const contentType = res.headers.get('Content-Type') || ''
+        return res.blob().then((blob) => ({ blob, contentType }))
       })
-      .then((blob) => {
+      .then(({ blob, contentType }) => {
         if (revoked) return
         const url = URL.createObjectURL(blob)
         setBlobUrl(url)
+        setMimeType(blob.type || contentType.split(';')[0].trim() || 'application/octet-stream')
         setLoading(false)
       })
       .catch((err) => {
@@ -152,13 +156,27 @@ function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose })
           </div>
         )}
         {blobUrl && !loadError && (
-          <iframe
-            title="Document view"
-            src={blobUrl}
-            className="w-full h-full border-0 bg-white"
-            sandbox="allow-same-origin allow-scripts"
-            allow="fullscreen"
-          />
+          <>
+            {mimeType && mimeType.toLowerCase().includes('pdf') ? (
+              <object
+                data={blobUrl}
+                type="application/pdf"
+                className="w-full h-full border-0 bg-white"
+                title="Document view"
+              >
+                <div className="p-6 text-center text-slate-400 text-sm">
+                  PDF viewer not available. Try Chrome, Edge, or Firefox with default settings.
+                </div>
+              </object>
+            ) : (
+              <iframe
+                title="Document view"
+                src={blobUrl}
+                className="w-full h-full border-0 bg-white"
+                sandbox="allow-same-origin"
+              />
+            )}
+          </>
         )}
       </div>
     </div>
