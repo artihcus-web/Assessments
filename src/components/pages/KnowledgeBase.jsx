@@ -79,14 +79,33 @@ function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose })
   }, [])
 
   const handleKeyDown = useCallback((e) => {
+    const key = (e.key || '').toLowerCase()
+    const keyCode = e.keyCode
+
+    // Copy, save, print, select all, view source
     if (e.ctrlKey || e.metaKey) {
-      const key = (e.key || '').toLowerCase()
-      if (key === 's' || key === 'c' || key === 'p' || key === 'u' || key === 'a') {
+      if (key === 's' || key === 'c' || key === 'p' || key === 'u' || key === 'a' || key === 'v') {
         e.preventDefault()
         return false
       }
     }
+    // DevTools
     if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C'))) {
+      e.preventDefault()
+      return false
+    }
+    // Print Screen / screenshot (keyCode 44 = PrintScreen; some browsers use key 'PrintScreen')
+    if (keyCode === 44 || key === 'printscreen') {
+      e.preventDefault()
+      return false
+    }
+    // Windows Win+Shift+S screenshot
+    if (e.key === 's' && e.shiftKey && (e.metaKey || e.altKey)) {
+      e.preventDefault()
+      return false
+    }
+    // Block paste
+    if ((e.ctrlKey || e.metaKey) && key === 'v') {
       e.preventDefault()
       return false
     }
@@ -95,20 +114,26 @@ function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose })
   useEffect(() => {
     const ctx = (e) => preventDefault(e)
     const copy = (e) => preventDefault(e)
+    const cut = (e) => preventDefault(e)
+    const paste = (e) => preventDefault(e)
     const key = (e) => handleKeyDown(e)
-    document.addEventListener('contextmenu', ctx)
-    document.addEventListener('copy', copy)
-    document.addEventListener('cut', copy)
-    document.addEventListener('keydown', key)
+    document.addEventListener('contextmenu', ctx, true)
+    document.addEventListener('copy', copy, true)
+    document.addEventListener('cut', cut, true)
+    document.addEventListener('paste', paste, true)
+    document.addEventListener('keydown', key, true)
     document.body.style.userSelect = 'none'
     document.body.style.webkitUserSelect = 'none'
+    document.body.style.webkitTouchCallout = 'none'
     return () => {
-      document.removeEventListener('contextmenu', ctx)
-      document.removeEventListener('copy', copy)
-      document.removeEventListener('cut', copy)
-      document.removeEventListener('keydown', key)
+      document.removeEventListener('contextmenu', ctx, true)
+      document.removeEventListener('copy', copy, true)
+      document.removeEventListener('cut', cut, true)
+      document.removeEventListener('paste', paste, true)
+      document.removeEventListener('keydown', key, true)
       document.body.style.userSelect = ''
       document.body.style.webkitUserSelect = ''
+      document.body.style.webkitTouchCallout = ''
     }
   }, [preventDefault, handleKeyDown])
 
@@ -116,10 +141,12 @@ function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose })
     <div
       ref={viewerRef}
       className="fixed inset-0 z-[100] flex flex-col bg-slate-900"
-      style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
+      style={{ userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}
       onContextMenu={preventDefault}
       onCopy={preventDefault}
       onCut={preventDefault}
+      onPaste={preventDefault}
+      onDragStart={preventDefault}
     >
       <div className="flex items-center justify-between px-4 py-2 bg-slate-800 border-b border-slate-700 flex-shrink-0">
         <div className="flex items-center gap-2 text-white">
@@ -159,9 +186,10 @@ function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose })
           <>
             {mimeType && mimeType.toLowerCase().includes('pdf') ? (
               <object
-                data={blobUrl}
+                data={`${blobUrl}#toolbar=0&navpanes=0&scrollbar=1`}
                 type="application/pdf"
-                className="w-full h-full border-0 bg-white"
+                className="w-full h-full border-0 bg-white select-none"
+                style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
                 title="Document view"
               >
                 <div className="p-6 text-center text-slate-400 text-sm">
@@ -172,7 +200,8 @@ function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose })
               <iframe
                 title="Document view"
                 src={blobUrl}
-                className="w-full h-full border-0 bg-white"
+                className="w-full h-full border-0 bg-white select-none"
+                style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
                 sandbox="allow-same-origin"
               />
             )}
