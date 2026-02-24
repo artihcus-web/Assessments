@@ -1,6 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
+import * as pdfjsLib from 'pdfjs-dist'
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url'
 import { apiRequest } from '../../utils/api'
 import { getApiBaseUrl } from '../../config/apiConfig'
+
+// PDF.js worker (canvas = no selectable text, no native toolbar)
+if (typeof pdfjsWorker === 'string') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
+}
 
 const BookIcon = ({ className = 'w-8 h-8' }) => (
   <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -20,7 +27,129 @@ const LockIcon = ({ className = 'w-4 h-4' }) => (
   </svg>
 )
 
-// Secure document viewer: view-only. Load document via fetch + blob URL.
+// PDF rendered to canvas = no selectable text, no native toolbar (no download/print).
+function SecurePdfCanvasViewer({ arrayBuffer, onContextMenu, scale: scaleProp }) {
+  const containerRef = useRef(null)
+  const [pages, setPages] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const scale = scaleProp ?? (typeof window !== 'undefined' ? Math.min(2, 1.5 * (window.devicePixelRatio || 1)) : 1.5)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    setPages([])
+
+    if (!arrayBuffer || !arrayBuffer.byteLength) {
+      setLoading(false)
+      return
+    }
+
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer })
+    loadingTask.promise
+      .then((pdf) => {
+        if (cancelled) return
+        const numPages = pdf.numPages
+        return Promise.all(
+          Array.from({ length: numPages }, (_, i) =>
+            pdf.getPage(i + 1).then((page) => {
+              if (cancelled) return null
+              const viewport = page.getViewport({ scale })
+              return { page, viewport, pageNum: i + 1 }
+            })
+          )
+        )
+      })
+      .then((pageData) => {
+        if (cancelled || !pageData) return
+        setPages(pageData.filter(Boolean))
+        setLoading(false)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err?.message || 'Failed to load PDF')
+          setLoading(false)
+        }
+      })
+
+    return () => { cancelled = true }
+  }, [arrayBuffer, scale])
+
+  useEffect(() => {
+    if (pages.length === 0) return
+    let cancelled = false
+    const run = () => {
+      const container = containerRef.current
+      if (!container || cancelled) return
+      const canvases = container.querySelectorAll('canvas')
+      if (canvases.length !== pages.length) return
+      pages.forEach(({ page, viewport }, i) => {
+        if (cancelled) return
+        const canvas = canvases[i]
+        if (!canvas || !page) return
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return
+        canvas.height = viewport.height
+        canvas.width = viewport.width
+        const task = page.render({
+          canvasContext: ctx,
+          viewport,
+          enableWebGL: false
+        })
+        if (task?.promise) task.promise.catch(() => {})
+      })
+    }
+    const t = requestAnimationFrame ? requestAnimationFrame(run) : setTimeout(run, 0)
+    return () => {
+      cancelled = true
+      if (typeof t === 'number') clearTimeout(t)
+    }
+  }, [pages])
+
+  if (error) {
+    return (
+      <div className="p-6 text-center text-slate-400 text-sm">
+        <p className="text-red-400 mb-2">{error}</p>
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="w-8 h-8 border-2 border-slate-600 border-t-emerald-500 rounded-full animate-spin" />
+        <p className="ml-3 text-slate-400 text-sm">Rendering pages…</p>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className="overflow-auto flex-1 w-full flex flex-col items-center py-4 px-2"
+      style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
+      onContextMenu={onContextMenu}
+    >
+      {pages.map(({ viewport, pageNum }, i) => (
+        <div key={pageNum} className="mb-4 shadow-lg bg-white">
+          <canvas
+            ref={null}
+            data-page={pageNum}
+            width={viewport.width}
+            height={viewport.height}
+            className="block max-w-full h-auto"
+            style={{ userSelect: 'none', WebkitUserSelect: 'none', pointerEvents: 'auto' }}
+            onContextMenu={onContextMenu}
+            draggable={false}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Secure document viewer: view-only. PDF = canvas (no selectable text); other types = iframe.
 // Use <object> for PDFs so Chrome doesn't block (Chrome often blocks PDF in sandboxed iframes).
 function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose }) {
   const viewerRef = useRef(null)
@@ -28,6 +157,7 @@ function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose })
   const viewUrl = `${baseUrl}/api/assessments/knowledge-requests/${requestId}/view?employeeId=${encodeURIComponent(employeeId)}`
 
   const [blobUrl, setBlobUrl] = useState(null)
+  const [pdfArrayBuffer, setPdfArrayBuffer] = useState(null)
   const [mimeType, setMimeType] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -37,23 +167,34 @@ function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose })
     setLoading(true)
     setLoadError(null)
     setBlobUrl(null)
+    setPdfArrayBuffer(null)
     setMimeType(null)
 
     fetch(viewUrl, { credentials: 'include', method: 'GET' })
-      .then((res) => {
+      .then(async (res) => {
         if (!res.ok) {
           if (res.status === 403) throw new Error('You do not have access to this document.')
           if (res.status === 404) throw new Error('Document not found.')
           throw new Error(res.statusText || 'Failed to load document')
         }
-        const contentType = res.headers.get('Content-Type') || ''
-        return res.blob().then((blob) => ({ blob, contentType }))
-      })
-      .then(({ blob, contentType }) => {
-        if (revoked) return
+        const contentType = (res.headers.get('Content-Type') || '').toLowerCase()
+        const isPdf = contentType.includes('pdf')
+        if (isPdf) {
+          const arrayBuffer = await res.arrayBuffer()
+          return { pdfArrayBuffer: arrayBuffer, mimeType: 'application/pdf' }
+        }
+        const blob = await res.blob()
         const url = URL.createObjectURL(blob)
-        setBlobUrl(url)
-        setMimeType(blob.type || contentType.split(';')[0].trim() || 'application/octet-stream')
+        return { blobUrl: url, mimeType: blob.type || contentType.split(';')[0].trim() || 'application/octet-stream' }
+      })
+      .then((data) => {
+        if (revoked) {
+          if (data.blobUrl) URL.revokeObjectURL(data.blobUrl)
+          return
+        }
+        if (data.pdfArrayBuffer) setPdfArrayBuffer(data.pdfArrayBuffer)
+        if (data.blobUrl) setBlobUrl(data.blobUrl)
+        setMimeType(data.mimeType)
         setLoading(false)
       })
       .catch((err) => {
@@ -182,21 +323,14 @@ function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose })
             </button>
           </div>
         )}
-        {blobUrl && !loadError && (
+        {(pdfArrayBuffer || blobUrl) && !loadError && (
           <>
-            {mimeType && mimeType.toLowerCase().includes('pdf') ? (
-              <object
-                data={`${blobUrl}#toolbar=0&navpanes=0&scrollbar=1`}
-                type="application/pdf"
-                className="w-full h-full border-0 bg-white select-none"
-                style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
-                title="Document view"
-              >
-                <div className="p-6 text-center text-slate-400 text-sm">
-                  PDF viewer not available. Try Chrome, Edge, or Firefox with default settings.
-                </div>
-              </object>
-            ) : (
+            {pdfArrayBuffer ? (
+              <SecurePdfCanvasViewer
+                arrayBuffer={pdfArrayBuffer}
+                onContextMenu={preventDefault}
+              />
+            ) : blobUrl ? (
               <iframe
                 title="Document view"
                 src={blobUrl}
@@ -204,7 +338,7 @@ function SecureDocumentViewer({ requestId, employeeId, documentTitle, onClose })
                 style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
                 sandbox="allow-same-origin"
               />
-            )}
+            ) : null}
           </>
         )}
       </div>
