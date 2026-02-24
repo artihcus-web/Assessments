@@ -52,7 +52,11 @@ function Login() {
       })
 
       if (data.status === 'approved') {
-        sessionStorage.setItem('assessments_approved', JSON.stringify({ employeeId: employeeId.trim(), approved: true }))
+        sessionStorage.setItem('assessments_approved', JSON.stringify({
+          employeeId: employeeId.trim(),
+          departmentId: departmentId || undefined,
+          approved: true
+        }))
         navigate('/assessments-dashboard', { replace: true })
         return
       }
@@ -75,7 +79,11 @@ function Login() {
       try {
         const data = await apiRequest(`/api/assessments/access-requests/check/${encodeURIComponent(pendingEmployeeId)}`)
         if (data.status === 'approved') {
-          sessionStorage.setItem('assessments_approved', JSON.stringify({ employeeId: pendingEmployeeId, approved: true }))
+          sessionStorage.setItem('assessments_approved', JSON.stringify({
+            employeeId: pendingEmployeeId,
+            departmentId: data.departmentId || undefined,
+            approved: true
+          }))
           navigate('/assessments-dashboard', { replace: true })
         }
       } catch {

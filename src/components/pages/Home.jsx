@@ -15,7 +15,18 @@ function Home() {
     async function load() {
       try {
         if (typeof window !== 'undefined') window.__lastAssessmentsStatus__ = undefined
-        const data = await apiRequest('/api/assessments/tests')
+        let departmentId = null
+        try {
+          const session = sessionStorage.getItem('assessments_approved')
+          const parsed = session ? JSON.parse(session) : {}
+          departmentId = parsed.departmentId || null
+        } catch {
+          // ignore
+        }
+        const url = departmentId
+          ? `/api/assessments/tests?departmentId=${encodeURIComponent(departmentId)}`
+          : '/api/assessments/tests'
+        const data = await apiRequest(url)
         if (!cancelled) setTests(data.tests || [])
       } catch (e) {
         if (typeof window !== 'undefined' && e.response?.status) window.__lastAssessmentsStatus__ = e.response.status
