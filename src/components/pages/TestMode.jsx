@@ -354,11 +354,10 @@ function TestMode() {
     navigate('/assessments-dashboard', { replace: true })
   }
 
-  // Ref for endExamAutomatically so visibility/ESC handlers can call it (must be after endExamAutomatically definition)
-  const endExamAutomaticallyRef = useRef(null)
+  // Keep ref pointing to latest endExamAutomatically (must run after endExamAutomatically is defined)
   useEffect(() => {
     endExamAutomaticallyRef.current = endExamAutomatically
-  }, [endExamAutomatically])
+  })
 
   const setAnswer = (questionId, value) => {
     setAnswers(prev => ({ ...prev, [questionId]: value }))
