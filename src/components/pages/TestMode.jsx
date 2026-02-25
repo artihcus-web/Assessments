@@ -41,6 +41,7 @@ function TestMode() {
   const visibilityChangeRef = useRef(null)
   const testDataRef = useRef(null)
   const answersRef = useRef({})
+  const endExamAutomaticallyRef = useRef(null)
 
   // Prevent back navigation and disable context menu
   useEffect(() => {
@@ -218,12 +219,6 @@ function TestMode() {
     }
   }, [testData, result, examEnded])
 
-  // Ref for endExamAutomatically so visibility handler can call it
-  const endExamAutomaticallyRef = useRef(null)
-  useEffect(() => {
-    endExamAutomaticallyRef.current = endExamAutomatically
-  }, [endExamAutomatically])
-
   // Strict tab switching, ESC key, and tab close detection
   useEffect(() => {
     if (!testData || result || examEnded) return
@@ -358,6 +353,12 @@ function TestMode() {
     alert(reason)
     navigate('/assessments-dashboard', { replace: true })
   }
+
+  // Ref for endExamAutomatically so visibility/ESC handlers can call it (must be after endExamAutomatically definition)
+  const endExamAutomaticallyRef = useRef(null)
+  useEffect(() => {
+    endExamAutomaticallyRef.current = endExamAutomatically
+  }, [endExamAutomatically])
 
   const setAnswer = (questionId, value) => {
     setAnswers(prev => ({ ...prev, [questionId]: value }))
