@@ -29,6 +29,15 @@ function TestMode() {
   const [showTabSwitchWarning, setShowTabSwitchWarning] = useState(false)
   const [showEscWarning, setShowEscWarning] = useState(false)
   const [escWarningShown, setEscWarningShown] = useState(false)
+  const [sessionInfo] = useState(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const raw = sessionStorage.getItem('assessments_approved')
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  })
   const [autoEndReason, setAutoEndReason] = useState(null)
   const [showFullscreenOverlay, setShowFullscreenOverlay] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -45,6 +54,7 @@ function TestMode() {
   const testDataRef = useRef(null)
   const answersRef = useRef({})
   const endExamAutomaticallyRef = useRef(null)
+  const visitedQuestionIdsRef = useRef(new Set())
 
   // Prevent back navigation and disable context menu
   useEffect(() => {
@@ -287,7 +297,7 @@ function TestMode() {
   // Handle tab switch warning confirmation
   const handleTabSwitchConfirm = () => {
     setShowTabSwitchWarning(false)
-    endExamAutomatically('Your test has been automatically submitted due to tab switching or leaving the exam. You cannot retake this test.')
+    endExamAutomatically('Your test has been automatically submitted due to tab switching or leaving the exam. You cannot retake this test.', 'tab_switch')
   }
 
   const handleTabSwitchCancel = () => {
@@ -333,8 +343,31 @@ function TestMode() {
     answersRef.current = answers
   }, [answers])
 
+  // Track visited questions for analytics
+  useEffect(() => {
+    if (!testData) return
+    const allQuestions = testData?.questions || []
+    const current = allQuestions[currentQuestionIndex]
+    if (current?._id) {
+      visitedQuestionIdsRef.current.add(String(current._id))
+    }
+  }, [currentQuestionIndex, testData])
+
+  const buildAttemptMeta = (endReasonCode, endReasonText, endedAtMs) => {
+    if (!sessionInfo?.employeeId || !startedAt) return null
+    return {
+      employeeId: sessionInfo.employeeId,
+      departmentName: '', // backend derives department via module
+      startedAt,
+      endedAt: endedAtMs,
+      endReasonCode,
+      endReasonText,
+      visitedQuestionIds: Array.from(visitedQuestionIdsRef.current || [])
+    }
+  }
+
   // Define endExamAutomatically function that uses refs to avoid circular dependencies
-  const endExamAutomatically = async (reason) => {
+  const endExamAutomatically = async (reason, endReasonCode = 'forced_exit') => {
     if (examEnded || autoSubmitDone.current) return
     setExamEnded(true)
     autoSubmitDone.current = true
@@ -352,9 +385,10 @@ function TestMode() {
           questionId: q._id,
           value: currentAnswers[q._id] ?? ''
         }))
+        const meta = buildAttemptMeta(endReasonCode, reason, Date.now())
         await apiRequest(`/api/assessments/tests/${currentTestData.test._id}/submit`, {
           method: 'POST',
-          body: JSON.stringify({ answers: answerList })
+          body: JSON.stringify(meta ? { answers: answerList, meta } : { answers: answerList })
         })
       } catch (e) {
         console.error('Auto-submit failed:', e)
@@ -435,9 +469,10 @@ function TestMode() {
         questionId: q._id,
         value: answers[q._id] ?? ''
       }))
+      const meta = buildAttemptMeta('user_submitted', 'User submitted the test', Date.now())
       const data = await apiRequest(`/api/assessments/tests/${testData.test._id}/submit`, {
         method: 'POST',
-        body: JSON.stringify({ answers: answerList })
+        body: JSON.stringify(meta ? { answers: answerList, meta } : { answers: answerList })
       })
       setResult(data)
     } catch (e) {
@@ -479,9 +514,10 @@ function TestMode() {
 
     if (currentTestData?.test?._id) {
       const answerList = (currentTestData.questions || []).map(q => ({ questionId: q._id, value: currentAnswers[q._id] ?? '' }))
+      const meta = buildAttemptMeta('time_up', 'Time up – test auto-submitted.', Date.now())
       apiRequest(`/api/assessments/tests/${currentTestData.test._id}/submit`, {
         method: 'POST',
-        body: JSON.stringify({ answers: answerList })
+        body: JSON.stringify(meta ? { answers: answerList, meta } : { answers: answerList })
       }).then(setResult).catch(() => setError('Auto-submit failed'))
     }
   }, [remainingSeconds, startedAt, testData, result, examEnded])

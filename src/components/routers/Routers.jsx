@@ -2,6 +2,7 @@ import React from 'react'
 import Home from '../pages/Home'
 import KnowledgeBase from '../pages/KnowledgeBase'
 import TestMode from '../pages/TestMode'
+import Reports from '../pages/Reports'
 import Products from '../pages/Products'
 import Contact from '../pages/Contact'
 import Cart from '../pages/Cart'
@@ -20,6 +21,7 @@ function Routers() {
             }>
               <Route index element={<Home />} />
               <Route path="knowledge-base" element={<KnowledgeBase />} />
+              <Route path="reports" element={<Reports />} />
             </Route>
             <Route path="/test-mode/:testId" element={
               <AssessmentProtectedRoute>
