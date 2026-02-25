@@ -27,6 +27,8 @@ function TestMode() {
   const [examEnded, setExamEnded] = useState(false)
   const [currentTime, setCurrentTime] = useState(Date.now())
   const [showTabSwitchWarning, setShowTabSwitchWarning] = useState(false)
+  const [showEscWarning, setShowEscWarning] = useState(false)
+  const [escWarningShown, setEscWarningShown] = useState(false)
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [markedQuestions, setMarkedQuestions] = useState(new Set())
   const [questionStatus, setQuestionStatus] = useState({}) // 'answered', 'not_answered', 'marked'
@@ -83,7 +85,7 @@ function TestMode() {
     }
   }, [])
 
-  // Full-screen mode
+  // Full-screen mode: enter on start and re-enter if user exits (cannot escape fullscreen)
   useEffect(() => {
     const enterFullscreen = async () => {
       try {
@@ -98,13 +100,30 @@ function TestMode() {
         console.warn('Fullscreen not available:', err)
       }
     }
-    
-    if (testData && !result) {
-      enterFullscreen()
+
+    if (!testData || result || examEnded) return
+
+    enterFullscreen()
+
+    const handleFullscreenChange = () => {
+      const isFullscreen = !!(
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.msFullscreenElement
+      )
+      if (!isFullscreen) {
+        enterFullscreen()
+      }
     }
-    
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange)
+
     return () => {
-      // Exit fullscreen when component unmounts
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange)
       if (document.exitFullscreen) {
         document.exitFullscreen().catch(() => {})
       } else if (document.webkitExitFullscreen) {
@@ -113,7 +132,7 @@ function TestMode() {
         document.msExitFullscreen().catch(() => {})
       }
     }
-  }, [testData, result])
+  }, [testData, result, examEnded])
 
   // Initialize camera and microphone
   useEffect(() => {
@@ -199,23 +218,33 @@ function TestMode() {
     }
   }, [testData, result, examEnded])
 
+  // Ref for endExamAutomatically so visibility handler can call it
+  const endExamAutomaticallyRef = useRef(null)
+  useEffect(() => {
+    endExamAutomaticallyRef.current = endExamAutomatically
+  }, [endExamAutomatically])
+
   // Strict tab switching, ESC key, and tab close detection
   useEffect(() => {
     if (!testData || result || examEnded) return
 
-    // Handle ESC key press
+    // Handle ESC key: first press = show warning, second press = submit test
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape' && !showTabSwitchWarning) {
-        e.preventDefault()
-        e.stopPropagation()
-        setShowTabSwitchWarning(true)
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      if (escWarningShown) {
+        endExamAutomaticallyRef.current?.('Your test has been automatically submitted because you pressed ESC again after the warning. You cannot retake this test.')
+        return
       }
+      setShowEscWarning(true)
+      setEscWarningShown(true)
     }
 
-    // Handle tab/window visibility change
+    // Tab switch = end test immediately (no warning)
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        setShowTabSwitchWarning(true)
+        endExamAutomaticallyRef.current?.('Your test has been automatically submitted because you switched tabs or left the exam window. You cannot retake this test.')
       }
     }
 
@@ -247,7 +276,7 @@ function TestMode() {
       window.removeEventListener('beforeunload', handleBeforeUnload)
       window.removeEventListener('blur', handleBlur)
     }
-  }, [testData, result, examEnded, showTabSwitchWarning])
+  }, [testData, result, examEnded, showTabSwitchWarning, escWarningShown])
 
   // Handle tab switch warning confirmation
   const handleTabSwitchConfirm = () => {
@@ -779,7 +808,40 @@ function TestMode() {
         </div>
       </div>
 
-      {/* Tab switch warning modal */}
+      {/* ESC warning modal: first ESC shows this; second ESC submits test */}
+      {showEscWarning && (
+        <div
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-[100] p-4"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-md w-full border-2 border-amber-500">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-6 h-6 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">Warning: ESC key pressed</h2>
+              </div>
+              <div className="mb-6">
+                <p className="text-sm text-slate-700 dark:text-slate-300">
+                  If you press the ESC key once again, your test will be <strong>directly submitted</strong>. You will not be able to retake this test.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEscWarning(false)}
+                className="w-full px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold rounded-lg transition-colors"
+              >
+                OK, I understand
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab switch warning modal (for back button, Ctrl+W, etc. – actual tab switch ends test immediately) */}
       {showTabSwitchWarning && (
         <div 
           className="fixed inset-0 bg-black/70 flex items-center justify-center z-[100] p-4"
