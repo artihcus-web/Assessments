@@ -9,6 +9,7 @@ function Home() {
   const [error, setError] = useState(null)
   const [rulesData, setRulesData] = useState(null) // { test, settings }
   const [rulesAccepted, setRulesAccepted] = useState(false)
+  const [selectedModuleKey, setSelectedModuleKey] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -53,6 +54,26 @@ function Home() {
       setError(e.response?.data?.message || e.message || 'Failed to load assessment information')
     }
   }
+
+  // ----- Group tests by module for initial module selection -----
+  const modules = React.useMemo(() => {
+    const map = new Map()
+    for (const t of tests || []) {
+      // Try to derive a stable module key from available fields
+      const rawModuleId = t.moduleId || t.module?._id || t.module || null
+      const key = rawModuleId || t.moduleName || 'default-module'
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          name: t.moduleName || t.moduleTitle || t.module || t.name || 'Assessment module',
+          departmentName: t.departmentName || '',
+          tests: []
+        })
+      }
+      map.get(key).tests.push(t)
+    }
+    return Array.from(map.values())
+  }, [tests])
 
   const handleStartTest = (testId) => {
     navigate(`/test-mode/${testId}`, { replace: true })
@@ -249,25 +270,54 @@ function Home() {
   return (
       <div className="max-w-3xl">
         <div className="mb-4">
-          <h1 className="text-sm font-semibold text-slate-900 dark:text-white">Select an assessment</h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Choose a module to start. Do not share your session.</p>
+          {!selectedModuleKey ? (
+            <>
+              <h1 className="text-sm font-semibold text-slate-900 dark:text-white">Select a module</h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Choose a module to view its available assessments. Do not share your session.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h1 className="text-sm font-semibold text-slate-900 dark:text-white">Select an assessment</h1>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Choose an assessment from the selected module. Do not share your session.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedModuleKey(null)
+                    setError(null)
+                  }}
+                  className="px-3 py-1 rounded-lg border border-slate-200 dark:border-slate-600 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                >
+                  ← All modules
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
+        {/* No data at all */}
         {tests.length === 0 ? (
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-8 text-center">
             <ClipboardIcon className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
             <p className="text-sm text-slate-600 dark:text-slate-400">No assessments available</p>
             <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Check back later or contact your administrator.</p>
           </div>
-        ) : (
+        ) : !selectedModuleKey ? (
+          // Step 1: Module selection
           <div className="grid gap-3 sm:grid-cols-2">
-            {tests.map((test, i) => {
+            {modules.map((mod, i) => {
               const color = TILE_COLORS[i % TILE_COLORS.length]
-              const testId = test._id || test.id
               return (
                 <button
-                  key={testId}
-                  onClick={() => handleTestClick(testId)}
+                  key={mod.key}
+                  type="button"
+                  onClick={() => setSelectedModuleKey(mod.key)}
                   className={`group w-full text-left bg-white dark:bg-slate-900 rounded-xl border ${color.border} p-4 shadow-sm hover:shadow-md transition-all duration-200`}
                 >
                   <div className="flex items-center gap-3">
@@ -275,23 +325,75 @@ function Home() {
                       <ClipboardIcon className={`w-4 h-4 ${color.icon}`} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <span className="font-semibold text-slate-900 dark:text-white text-sm block truncate">{test.name}</span>
-                      {(test.departmentName || test.moduleName) && (
+                      <span className="font-semibold text-slate-900 dark:text-white text-sm block truncate">
+                        {mod.name}
+                      </span>
+                      {(mod.departmentName || mod.tests.length) > 0 && (
                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
-                          {[test.departmentName, test.moduleName].filter(Boolean).join(' · ')}
+                          {[mod.departmentName, `${mod.tests.length} assessment${mod.tests.length > 1 ? 's' : ''}`]
+                            .filter(Boolean)
+                            .join(' · ')}
                         </p>
-                      )}
-                      {test.description && (
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">{test.description}</p>
                       )}
                     </div>
                     <ChevronRightIcon className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
                   </div>
-                  <p className={`mt-2 text-xs font-medium ${color.label}`}>Start →</p>
+                  <p className={`mt-2 text-xs font-medium ${color.label}`}>Open module →</p>
                 </button>
               )
             })}
           </div>
+        ) : (
+          // Step 2: Assessment selection for chosen module
+          (() => {
+            const modIndex = modules.findIndex(m => m.key === selectedModuleKey)
+            const module = modIndex >= 0 ? modules[modIndex] : null
+            if (!module) {
+              return (
+                <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-8 text-center">
+                  <p className="text-sm text-slate-600 dark:text-slate-400">No assessments found for this module.</p>
+                </div>
+              )
+            }
+            return (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {module.tests.map((test, i) => {
+                  const color = TILE_COLORS[i % TILE_COLORS.length]
+                  const testId = test._id || test.id
+                  return (
+                    <button
+                      key={testId}
+                      onClick={() => handleTestClick(testId)}
+                      className={`group w-full text-left bg-white dark:bg-slate-900 rounded-xl border ${color.border} p-4 shadow-sm hover:shadow-md transition-all duration-200`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-lg ${color.bg} flex items-center justify-center flex-shrink-0`}>
+                          <ClipboardIcon className={`w-4 h-4 ${color.icon}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="font-semibold text-slate-900 dark:text-white text-sm block truncate">
+                            {test.name}
+                          </span>
+                          {(test.departmentName || test.moduleName) && (
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
+                              {[test.departmentName, test.moduleName].filter(Boolean).join(' · ')}
+                            </p>
+                          )}
+                          {test.description && (
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
+                              {test.description}
+                            </p>
+                          )}
+                        </div>
+                        <ChevronRightIcon className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
+                      </div>
+                      <p className={`mt-2 text-xs font-medium ${color.label}`}>Start →</p>
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          })()
         )}
 
         <p className="mt-5 text-center text-xs text-slate-400 dark:text-slate-500 flex items-center justify-center gap-1">
