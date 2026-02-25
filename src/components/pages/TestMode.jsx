@@ -29,6 +29,9 @@ function TestMode() {
   const [showTabSwitchWarning, setShowTabSwitchWarning] = useState(false)
   const [showEscWarning, setShowEscWarning] = useState(false)
   const [escWarningShown, setEscWarningShown] = useState(false)
+  const [autoEndReason, setAutoEndReason] = useState(null)
+  const [showFullscreenOverlay, setShowFullscreenOverlay] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [markedQuestions, setMarkedQuestions] = useState(new Set())
   const [questionStatus, setQuestionStatus] = useState({}) // 'answered', 'not_answered', 'marked'
@@ -86,7 +89,7 @@ function TestMode() {
     }
   }, [])
 
-  // Full-screen mode: enter on start and re-enter if user exits (cannot escape fullscreen)
+  // Full-screen mode: enter on start, re-enter on exit, show overlay if user escapes
   useEffect(() => {
     const enterFullscreen = async () => {
       try {
@@ -97,8 +100,11 @@ function TestMode() {
         } else if (document.documentElement.msRequestFullscreen) {
           await document.documentElement.msRequestFullscreen()
         }
+        setIsFullscreen(true)
+        setShowFullscreenOverlay(false)
       } catch (err) {
         console.warn('Fullscreen not available:', err)
+        setShowFullscreenOverlay(true)
       }
     }
 
@@ -107,13 +113,17 @@ function TestMode() {
     enterFullscreen()
 
     const handleFullscreenChange = () => {
-      const isFullscreen = !!(
+      const fullscreenActive = !!(
         document.fullscreenElement ||
         document.webkitFullscreenElement ||
         document.msFullscreenElement
       )
-      if (!isFullscreen) {
+      setIsFullscreen(fullscreenActive)
+      if (!fullscreenActive) {
         enterFullscreen()
+        setShowFullscreenOverlay(true)
+      } else {
+        setShowFullscreenOverlay(false)
       }
     }
 
@@ -125,6 +135,7 @@ function TestMode() {
       document.removeEventListener('fullscreenchange', handleFullscreenChange)
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
       document.removeEventListener('MSFullscreenChange', handleFullscreenChange)
+      setShowFullscreenOverlay(false)
       if (document.exitFullscreen) {
         document.exitFullscreen().catch(() => {})
       } else if (document.webkitExitFullscreen) {
@@ -350,8 +361,7 @@ function TestMode() {
       }
     }
 
-    alert(reason)
-    navigate('/assessments-dashboard', { replace: true })
+    setAutoEndReason(reason)
   }
 
   // Keep ref pointing to latest endExamAutomatically (must run after endExamAutomatically is defined)
@@ -600,8 +610,41 @@ function TestMode() {
     return `${hours.toString().padStart(2, '0')} hours ${minutes.toString().padStart(2, '0')} minutes ${secs.toString().padStart(2, '0')} seconds`
   }
 
+  const requestFullscreen = () => {
+    const el = document.documentElement
+    try {
+      if (el.requestFullscreen) el.requestFullscreen()
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen()
+      else if (el.msRequestFullscreen) el.msRequestFullscreen()
+    } catch (err) {
+      console.warn('Fullscreen request failed:', err)
+    }
+  }
+
   return (
     <div className="fixed inset-0 bg-slate-50 dark:bg-slate-900 overflow-hidden z-40 flex flex-col">
+      {/* Fullscreen escape overlay – blocks test until user returns to fullscreen */}
+      {showFullscreenOverlay && !examEnded && !result && (
+        <div className="fixed inset-0 z-[110] bg-slate-900 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-md w-full border-2 border-amber-500 p-6 text-center">
+            <div className="w-14 h-14 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mx-auto mb-4">
+              <svg className="w-7 h-7 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">You left fullscreen</h2>
+            <p className="text-slate-600 dark:text-slate-400 mb-6">You must stay in fullscreen for the duration of the exam. Click below to return to fullscreen to continue.</p>
+            <button
+              type="button"
+              onClick={requestFullscreen}
+              className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-lg transition-colors"
+            >
+              Return to fullscreen
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top header */}
       <div className="sticky top-0 z-30 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 shadow-sm">
         <div className="px-6 py-4 text-center">
@@ -807,6 +850,35 @@ function TestMode() {
           </div>
         </div>
       </div>
+
+      {/* Auto-end reason popup: shown when test ended due to tab switch / ESC – explains why and offers Return to dashboard */}
+      {autoEndReason && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[105] p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-md w-full border-2 border-red-500 overflow-hidden">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">Test ended</h2>
+              </div>
+              <p className="text-sm text-slate-700 dark:text-slate-300 mb-6">{autoEndReason}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setAutoEndReason(null)
+                  navigate('/assessments-dashboard', { replace: true })
+                }}
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
+              >
+                Return to dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ESC warning modal: first ESC shows this; second ESC submits test */}
       {showEscWarning && (
